@@ -1,0 +1,78 @@
+<script>
+    var date = new Date(); // This gives the local date and time
+</script>
+<?php
+// Enable error reporting
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+include("../conn/conn.php");
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['qr_code'])) {
+        $qrCode = $_POST['qr_code'];
+
+        // Retrieve student ID based on QR code
+        $selectStmt = $conn->prepare("SELECT tbl_student_id FROM tbl_student WHERE generated_code = :generated_code");
+        $selectStmt->bindParam(":generated_code", $qrCode, PDO::PARAM_STR);
+
+        if ($selectStmt->execute()) {
+            $result = $selectStmt->fetch(PDO::FETCH_ASSOC);
+            if ($result !== false) {
+                $studentID = $result["tbl_student_id"];
+                
+                // Get the current datetime in the India timezone
+                date_default_timezone_set('Asia/Kolkata');
+                $currentTime = date("Y-m-d H:i:s");
+
+                // Check if the student has an active attendance record (time_out is NULL)
+                $checkAttendanceStmt = $conn->prepare("SELECT tbl_attendance_id, time_in FROM tbl_attendance WHERE tbl_student_id = :student_id AND time_out IS NULL");
+                $checkAttendanceStmt->bindParam(":student_id", $studentID, PDO::PARAM_INT);
+                $checkAttendanceStmt->execute();
+
+                if ($checkAttendanceStmt->rowCount() > 0) {
+                    // Update the existing attendance record with time_out
+                    $attendanceRow = $checkAttendanceStmt->fetch(PDO::FETCH_ASSOC);
+                    $attendanceID = $attendanceRow["tbl_attendance_id"];
+
+                    $updateStmt = $conn->prepare("UPDATE tbl_attendance SET time_out = :time_out WHERE tbl_attendance_id = :attendance_id");
+                    $updateStmt->bindParam(":time_out", $currentTime, PDO::PARAM_STR);
+                    $updateStmt->bindParam(":attendance_id", $attendanceID, PDO::PARAM_INT);
+
+                    if ($updateStmt->execute()) {
+                        echo "Attendance time out recorded.";
+                    } else {
+                        echo "Failed to update attendance record.";
+                    }
+                } else {
+                    // No active record found, insert new attendance record with time_in
+                    $insertStmt = $conn->prepare("INSERT INTO tbl_attendance (tbl_student_id, time_in) VALUES (:tbl_student_id, :time_in)");
+                    $insertStmt->bindParam(":tbl_student_id", $studentID, PDO::PARAM_INT);
+                    $insertStmt->bindParam(":time_in", $currentTime, PDO::PARAM_STR);
+
+                    if ($insertStmt->execute()) {
+                        echo "Attendance time in recorded.";
+                    } else {
+                        echo "Failed to insert attendance record.";
+                    }
+                }
+            } else {
+                echo "No student found with this QR Code.";
+            }
+        } else {
+            echo "Failed to execute the statement.";
+        }
+
+        // Redirect to the index page after processing
+        header("Location: http://localhost/qr-code-attendance-system/index.php");
+        exit();
+    } else {
+        echo "
+            <script>
+                alert('Please fill in all fields!');
+                window.location.href = 'http://localhost/qr-code-attendance-system/index.php';
+            </script>
+        ";
+    }
+}
+?>
